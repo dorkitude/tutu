@@ -267,6 +267,62 @@ def done(item_id: int):
     
     console.print(f"✅ [green]TutuItem #{item_id} marked as done![/green] 🎉")
 
+@app.command()
+def edit(item_id: int):
+    """Edit a TutuItem interactively"""
+    session = get_session()
+    
+    item = session.query(TutuItem).filter(TutuItem.id == item_id).first()
+    
+    if not item:
+        console.print(f"❌ [red]TutuItem with ID {item_id} not found[/red]")
+        return
+    
+    console.print(f"\n✏️  [bold cyan]Editing TutuItem #{item.id}[/bold cyan] ✏️\n")
+    
+    # Show current values
+    console.print(f"[dim]Current title:[/dim] {item.title}")
+    new_title = Prompt.ask("📝 New title (press Enter to keep current)", default=item.title)
+    
+    console.print(f"\n[dim]Current description:[/dim]\n{item.description}")
+    console.print("\n📄 New description (press Ctrl+D when done, or just Ctrl+D to keep current):")
+    
+    lines = []
+    try:
+        while True:
+            line = input()
+            lines.append(line)
+    except EOFError:
+        pass
+    
+    new_description = "\n".join(lines) if lines else item.description
+    
+    console.print(f"\n[dim]Current context:[/dim]\n{item.context if item.context else '(empty)'}")
+    console.print("\n🌟 New context (press Ctrl+D when done, or just Ctrl+D to keep current):")
+    
+    context_lines = []
+    try:
+        while True:
+            line = input()
+            context_lines.append(line)
+    except EOFError:
+        pass
+    
+    new_context = "\n".join(context_lines) if context_lines else item.context
+    
+    # Update the item
+    item.title = new_title
+    item.description = new_description
+    item.context = new_context
+    
+    session.commit()
+    
+    console.print(f"\n✅ [bold green]TutuItem #{item.id} updated successfully![/bold green]")
+    console.print(f"\n[bold]Title:[/bold] {item.title}")
+    console.print(f"[bold]Description:[/bold]\n{item.description}")
+    if item.context:
+        console.print(f"[bold]Context:[/bold]\n{item.context}")
+
 def main():
     app()
 
