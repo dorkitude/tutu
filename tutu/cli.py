@@ -2,6 +2,7 @@ import typer
 from typing import Optional
 from datetime import datetime
 import subprocess
+import os
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -147,6 +148,9 @@ def status(item_id: int):
 @app.command()
 def start(item_id: int):
     """Start a Claude Code session with TutuItem context"""
+    # Capture the current working directory before any operations
+    original_cwd = os.getcwd()
+    
     session = get_session()
     
     item = session.query(TutuItem).filter(TutuItem.id == item_id).first()
@@ -199,7 +203,8 @@ def start(item_id: int):
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
-            text=True
+            text=True,
+            cwd=original_cwd  # Explicitly set the working directory
         )
         
         # Send the context to Claude Code

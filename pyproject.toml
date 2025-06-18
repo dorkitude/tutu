@@ -3,7 +3,7 @@ name = "tutu"
 version = "0.1.0"
 description = "Task management system for Claude Code sessions"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0.41",
     "typer>=0.16.0",
