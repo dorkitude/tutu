@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.prompt import Prompt
 from rich import print as rprint
 
-from .models import get_session, TutuItem, TutuItemStep
+from .models import get_session, TutuItem, TutuItemStep, get_pacific_now
 
 app = typer.Typer()
 console = Console()
@@ -80,6 +80,7 @@ def list():
     table.add_column("Title", style="white")
     table.add_column("Status", style="yellow")
     table.add_column("Steps", style="green", justify="center")
+    table.add_column("Created", style="blue")
     table.add_column("Updated", style="blue")
     
     for item in items:
@@ -87,6 +88,7 @@ def list():
         completed_steps = sum(1 for step in item.steps if step.status == 'done')
         steps_info = f"{completed_steps}/{steps_count}"
         
+        created = item.created_at.strftime("%Y-%m-%d %H:%M")
         updated = item.updated_at.strftime("%Y-%m-%d %H:%M")
         
         table.add_row(
@@ -94,6 +96,7 @@ def list():
             item.title,
             item.status,
             steps_info,
+            created,
             updated
         )
     
@@ -110,6 +113,7 @@ def status(item_id: int):
         console.print(f"❌ [red]TutuItem with ID {item_id} not found[/red]")
         return
     
+    console.print(f"IMPORTANT:  Your task is to finish the TutuItem below.")
     console.print(f"\n🔍 [bold cyan]TutuItem #{item.id}[/bold cyan]\n")
     console.print(f"[bold]Title:[/bold] {item.title}")
     console.print(f"[bold]Status:[/bold] {item.status}")
@@ -132,13 +136,15 @@ def status(item_id: int):
         steps_table.add_column("Description", style="white")
         steps_table.add_column("Status", style="yellow")
         steps_table.add_column("Created", style="blue")
+        steps_table.add_column("Updated", style="blue")
         
         for step in item.steps:
             steps_table.add_row(
                 str(step.id),
                 step.description,
                 step.status,
-                step.created_at.strftime("%Y-%m-%d %H:%M")
+                step.created_at.strftime("%Y-%m-%d %H:%M"),
+                step.updated_at.strftime("%Y-%m-%d %H:%M")
             )
         
         console.print(steps_table)
@@ -162,7 +168,7 @@ def start(item_id: int):
     # Update status and first_progress_at
     item.status = 'in_progress'
     if not item.first_progress_at:
-        item.first_progress_at = datetime.utcnow()
+        item.first_progress_at = get_pacific_now()
     
     session.commit()
     
@@ -194,17 +200,23 @@ def start(item_id: int):
     if not item.steps:
         context += "No steps defined yet.\n"
     
-    context += f"\n---\n\n{readme_content}"
+    context += f"\n---\n<README>\n{readme_content}\n</README>\n"
     
-    # Start Claude Code with the context
-    cmd = ["/opt/homebrew/bin/claude", "--dangerously-skip-permissions"]
+    # Start Claude Code with the context using cly function
+    # First, source the daemon-wrappers script and then run cly
+    cmd = [
+        "/bin/zsh",
+        "-c",
+        f"source /Users/dorkitude/a/scripts/daemon-wrappers.zsh && cly"
+    ]
     
     try:
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             text=True,
-            cwd=original_cwd  # Explicitly set the working directory
+            cwd=original_cwd,  # Explicitly set the working directory
+            env={**os.environ}  # Pass environment variables
         )
         
         # Send the context to Claude Code
@@ -324,6 +336,12 @@ def edit(item_id: int):
         console.print(f"[bold]Context:[/bold]\n{item.context}")
 
 def main():
+    import sys
+    
+    # If no arguments provided (just 'tutu'), default to list command
+    if len(sys.argv) == 1:
+        sys.argv.append("list")
+    
     app()
 
 if __name__ == "__main__":

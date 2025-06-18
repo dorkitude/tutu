@@ -1,10 +1,18 @@
 from datetime import datetime
+import pytz
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from pathlib import Path
 
 Base = declarative_base()
+
+# Pacific timezone
+PACIFIC_TZ = pytz.timezone('America/Los_Angeles')
+
+def get_pacific_now():
+    """Get current time in Pacific timezone"""
+    return datetime.now(PACIFIC_TZ)
 
 class TutuItem(Base):
     __tablename__ = 'tutu_items'
@@ -15,8 +23,8 @@ class TutuItem(Base):
     status = Column(String(50), default='pending')
     context = Column(Text)
     first_progress_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_pacific_now)
+    updated_at = Column(DateTime, default=get_pacific_now, onupdate=get_pacific_now)
     
     steps = relationship("TutuItemStep", back_populates="item", cascade="all, delete-orphan")
 
@@ -27,8 +35,8 @@ class TutuItemStep(Base):
     item_id = Column(Integer, ForeignKey('tutu_items.id'), nullable=False)
     description = Column(Text, nullable=False)
     status = Column(String(50), default='pending')
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_pacific_now)
+    updated_at = Column(DateTime, default=get_pacific_now, onupdate=get_pacific_now)
     
     item = relationship("TutuItem", back_populates="steps")
 
