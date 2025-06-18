@@ -39,6 +39,8 @@ tutu status <item_id>
 3. **Use `tutu done`** only when the entire task is complete
 4. The item ID and step IDs are shown in the initial context when the session starts
 5. **Make sure all of your internal Todo list steps also update TutuItem and TutuItemStep**
+6. **Tutu location**: The absolute path to tutu is `/Users/dorkitude/Library/Python/3.11/bin/tutu`
+7. **Print steps after updates**: Always run `tutu status <item_id>` after adding or completing steps to show the current progress
 
 ## Example Workflow =�
 
