@@ -8,8 +8,12 @@ from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt
 from rich import print as rprint
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.text import Text
 
 from .models import get_session, TutuItem, TutuItemStep, get_pacific_now
+from .utils import format_relative_time
 
 app = typer.Typer()
 console = Console()
@@ -87,16 +91,18 @@ def list(all: bool = typer.Option(False, "--all", help="Show all items including
     table.add_column("Title", style="white", max_width=40, no_wrap=True, overflow="ellipsis")
     table.add_column("Status", style="yellow", width=7)
     table.add_column("Steps", style="green", justify="center", width=6)
-    table.add_column("Created", style="blue", no_wrap=True)
-    table.add_column("Updated", style="blue", no_wrap=True)
+    table.add_column("Created", style="blue", no_wrap=True, width=30)
+    table.add_column("Updated", style="blue", no_wrap=True, width=30)
     
     for item in items:
         steps_count = len(item.steps)
         completed_steps = sum(1 for step in item.steps if step.status == 'done')
         steps_info = f"{completed_steps}/{steps_count}"
         
-        created = item.created_at.strftime("%m/%d %H:%M")
-        updated = item.updated_at.strftime("%m/%d %H:%M")
+        created_relative = format_relative_time(item.created_at)
+        updated_relative = format_relative_time(item.updated_at)
+        created = f"{created_relative} • {item.created_at.strftime('%m/%d %H:%M')}"
+        updated = f"{updated_relative} • {item.updated_at.strftime('%m/%d %H:%M')}"
         
         table.add_row(
             str(item.id),
@@ -120,38 +126,106 @@ def status(item_id: int):
         console.print(f"❌ [red]TutuItem with ID {item_id} not found[/red]")
         return
     
-    console.print(f"IMPORTANT:  Your task is to finish the TutuItem below.")
-    console.print(f"\n🔍 [bold cyan]TutuItem #{item.id}[/bold cyan]\n")
-    console.print(f"[bold]Title:[/bold] {item.title}")
-    console.print(f"[bold]Status:[/bold] {item.status}")
-    console.print(f"[bold]Created:[/bold] {item.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
-    console.print(f"[bold]Updated:[/bold] {item.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    # Create a cute header with sparkles
+    header = Text()
+    header.append("✨ ", style="bright_yellow")
+    header.append(f"TUTU STATUS infodump.   Full deets inbound.", style="bold bright_white")
+    header.append(" ✨", style="bright_yellow")
+    console.print(Panel(header, border_style="bright_yellow", padding=(0, 2)))
+    console.print()
+    
+    # Title section with cute box
+    title_text = Text()
+    title_text.append("🎯 ", style="bright_cyan")
+    title_text.append(f"TutuItem #{item.id}: ", style="bold bright_cyan")
+    title_text.append(item.title, style="bold bright_white")
+    console.print(Panel(title_text, border_style="cyan", padding=(0, 1)))
+    console.print()
+    
+    # Status info table
+    status_table = Table(show_header=False, box=None, padding=(0, 2))
+    status_table.add_column("Label", style="bold", no_wrap=True)
+    status_table.add_column("Value", style="bright_white")
+    
+    # Status badge with emoji
+    status_emoji = "🚀" if item.status == "in_progress" else "✅" if item.status == "completed" else "📋"
+    status_color = "yellow" if item.status == "in_progress" else "green" if item.status == "completed" else "blue"
+    status_table.add_row(
+        f"{status_emoji} Status:",
+        f"[{status_color}]{item.status}[/{status_color}]"
+    )
+    
+    # Time information with relative times
+    created_relative = format_relative_time(item.created_at)
+    updated_relative = format_relative_time(item.updated_at)
+    
+    status_table.add_row(
+        "🕐 Created:",
+        f"[dim]{created_relative}[/dim] • [bright_blue]{item.created_at.strftime('%Y-%m-%d %H:%M:%S')}[/bright_blue]"
+    )
+    
+    status_table.add_row(
+        "🕑 Updated:",
+        f"[dim]{updated_relative}[/dim] • [bright_blue]{item.updated_at.strftime('%Y-%m-%d %H:%M:%S')}[/bright_blue]"
+    )
     
     if item.first_progress_at:
-        console.print(f"[bold]First Progress:[/bold] {item.first_progress_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        progress_relative = format_relative_time(item.first_progress_at)
+        status_table.add_row(
+            "🏁 First Progress:",
+            f"[dim]{progress_relative}[/dim] • [bright_green]{item.first_progress_at.strftime('%Y-%m-%d %H:%M:%S')}[/bright_green]"
+        )
     
+    console.print(status_table)
+    
+    # Description section with cute formatting
     if item.description:
-        console.print(f"\n[bold]Description:[/bold]\n{item.description}")
+        console.print()
+        desc_panel = Panel(
+            item.description,
+            title="📝 Description",
+            title_align="left",
+            border_style="bright_magenta",
+            padding=(1, 2)
+        )
+        console.print(desc_panel)
     
+    # Context section with cute formatting
     if item.context:
-        console.print(f"\n[bold]Context:[/bold]\n{item.context}")
+        console.print()
+        context_panel = Panel(
+            item.context,
+            title="🌟 Context",
+            title_align="left",
+            border_style="bright_yellow",
+            padding=(1, 2)
+        )
+        console.print(context_panel)
     
     if item.steps:
-        console.print(f"\n[bold]Steps:[/bold]")
-        steps_table = Table(show_header=True, header_style="bold")
-        steps_table.add_column("ID", style="cyan", width=6)
-        steps_table.add_column("Description", style="white")
-        steps_table.add_column("Status", style="yellow")
-        steps_table.add_column("Created", style="blue")
-        steps_table.add_column("Updated", style="blue")
+        console.print()
+        console.print("📝 [bold]Steps:[/bold]")
+        steps_table = Table(show_header=True, header_style="bold magenta", expand=False)
+        steps_table.add_column("ID", style="cyan", width=4)
+        steps_table.add_column("Description", style="white", max_width=50)
+        steps_table.add_column("Status", style="yellow", width=8)
+        steps_table.add_column("Created", style="blue", no_wrap=True)
+        steps_table.add_column("Updated", style="blue", no_wrap=True)
         
         for step in item.steps:
+            created_relative = format_relative_time(step.created_at)
+            updated_relative = format_relative_time(step.updated_at)
+            
+            # Status emoji
+            step_emoji = "✅" if step.status == "done" else "⏳"
+            status_display = f"{step_emoji} {step.status}"
+            
             steps_table.add_row(
                 str(step.id),
                 step.description,
-                step.status,
-                step.created_at.strftime("%Y-%m-%d %H:%M"),
-                step.updated_at.strftime("%Y-%m-%d %H:%M")
+                status_display,
+                f"{created_relative} • {step.created_at.strftime('%m/%d %H:%M')}",
+                f"{updated_relative} • {step.updated_at.strftime('%m/%d %H:%M')}"
             )
         
         console.print(steps_table)
