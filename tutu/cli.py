@@ -63,19 +63,26 @@ def add():
         console.print(f"[bold]Context:[/bold]\n{item.context}")
 
 @app.command()
-def list():
-    """List all TutuItems that aren't done"""
+def list(all: bool = typer.Option(False, "--all", help="Show all items including completed ones")):
+    """List all TutuItems (by default, only shows pending items)"""
     session = get_session()
     
-    items = session.query(TutuItem).filter(
-        TutuItem.status != 'done'
-    ).order_by(TutuItem.updated_at.desc()).all()
+    if all:
+        items = session.query(TutuItem).order_by(TutuItem.updated_at.desc()).all()
+    else:
+        items = session.query(TutuItem).filter(
+            TutuItem.status != 'done'
+        ).order_by(TutuItem.updated_at.desc()).all()
     
     if not items:
-        console.print("🎉 [yellow]No pending items![/yellow]")
+        if all:
+            console.print("📭 [yellow]No items found![/yellow]")
+        else:
+            console.print("🎉 [yellow]No pending items![/yellow]")
         return
     
-    table = Table(title="📋 Tutu Items", show_header=True, header_style="bold magenta")
+    title = "📋 All Tutu Items" if all else "📋 Pending Tutu Items"
+    table = Table(title=title, show_header=True, header_style="bold magenta")
     table.add_column("ID", style="cyan", width=6)
     table.add_column("Title", style="white")
     table.add_column("Status", style="yellow")
@@ -180,6 +187,12 @@ def start(item_id: int):
     if readme_path.exists():
         readme_content = readme_path.read_text()
     
+    # Read TUTU_START_PROMPT.md
+    tutu_prompt_path = Path(__file__).parent.parent / "TUTU_START_PROMPT.md"
+    tutu_prompt_content = ""
+    if tutu_prompt_path.exists():
+        tutu_prompt_content = tutu_prompt_path.read_text()
+    
     # Prepare context for Claude Code
     context = f"""# TutuItem #{item.id}: {item.title}
 
@@ -200,7 +213,7 @@ def start(item_id: int):
     if not item.steps:
         context += "No steps defined yet.\n"
     
-    context += f"\n---\n<README>\n{readme_content}\n</README>\n"
+    context += f"\n---\n<README>\n{readme_content}\n</README>\n\n---\n{tutu_prompt_content}\n"
     
     # Start Claude Code with the context using cly function
     # First, source the daemon-wrappers script and then run cly
@@ -226,7 +239,7 @@ def start(item_id: int):
         console.print(f"❌ [red]Error starting Claude Code: {e}[/red]")
 
 @app.command()
-def add_step(item_id: int, description: str):
+def add_step(item_id: int, description: Optional[str] = None):
     """Add a step to a TutuItem"""
     session = get_session()
     
@@ -235,6 +248,25 @@ def add_step(item_id: int, description: str):
     if not item:
         console.print(f"❌ [red]TutuItem with ID {item_id} not found[/red]")
         return
+    
+    # Interactive mode if no description provided
+    if description is None:
+        console.print(f"\n📝 [bold cyan]Adding step to TutuItem #{item_id}: {item.title}[/bold cyan]\n")
+        console.print("📄 Step description (press Ctrl+D when done):")
+        
+        lines = []
+        try:
+            while True:
+                line = input()
+                lines.append(line)
+        except EOFError:
+            pass
+        
+        description = "\n".join(lines).strip()
+        
+        if not description:
+            console.print("❌ [red]Step description cannot be empty[/red]")
+            return
     
     step = TutuItemStep(
         item_id=item_id,

@@ -1,50 +1,74 @@
-# Tutu - Task Management System <�
+# Tutu - Task Management System
 
-Welcome to Tutu! This is a task management system designed to work seamlessly with Claude Code.
+Tutu is a task management system designed to help track work items and their associated steps. It integrates seamlessly with Claude Code to provide persistent task tracking across sessions.
 
-## For Claude Code Users >
+## Installation
 
-When you're working on a TutuItem through Claude Code, here are the commands you can use:
-
-### Managing Steps
-
-To add a new step to the current TutuItem:
 ```bash
-tutu add-step <item_id> "Description of the step"
+# Install using pip or uv
+uv pip install -e .
 ```
 
-To mark a step as complete:
+## Basic Usage
+
+### Managing Items
+
+Create a new item:
 ```bash
-tutu complete-step <step_id>
+tutu add
+```
+This will start an interactive session prompting for title, description, and context.
+
+List all items:
+```bash
+tutu list
 ```
 
-### Completing the Task
-
-When you've finished working on the TutuItem:
-```bash
-tutu done <item_id>
-```
-
-### Checking Status
-
-To see the current status of the TutuItem:
+View item details:
 ```bash
 tutu status <item_id>
 ```
 
-## Important Notes for Claude Code
+Mark an item as complete:
+```bash
+tutu done <item_id>
+```
 
-1. **Always track your progress** by adding steps as you work
-2. **Mark steps as complete** when you finish them.  Print the name of the step you completed, plus a checkmark emoji.
-3. **Use `tutu done`** only when the entire task is complete
-4. The item ID and step IDs are shown in the initial context when the session starts
-5. **Make sure all of your internal Todo list steps also update TutuItem and TutuItemStep**
-6. **Tutu location**: The absolute path to tutu is `/Users/dorkitude/Library/Python/3.11/bin/tutu`
-7. **Print steps after updates**: Always run `tutu status <item_id>` after adding or completing steps to show the current progress
+Edit an existing item:
+```bash
+tutu edit <item_id>
+```
+This will start an interactive session to update the title, description, and context.
 
-## Example Workflow =�
+Start a Claude Code session with item context:
+```bash
+tutu start <item_id>
+```
 
-1. You'll see the TutuItem details when the session starts
-2. As you work, add steps: `tutu add-step 1 "Implemented user authentication"`
-3. Complete steps as you go: `tutu complete-step 1`
-4. When everything is done: `tutu done 1`
+### Managing Steps
+
+Add a step to an item:
+```bash
+# Interactive mode (prompts for multi-line description)
+tutu add-step <item_id>
+
+# Or with --description option
+tutu add-step <item_id> --description "Description of the step"
+```
+
+Complete a step:
+```bash
+tutu complete-step <step_id>
+```
+
+## Claude Code Integration
+
+Tutu is designed to work with Claude Code. When starting a Claude session with `tutu start`, it will:
+
+1. Prompt you to select an active TutuItem to work on
+2. Inject context about the item and its steps into the Claude session
+3. Provide Claude with instructions on how to track progress using Tutu commands
+
+## Database
+
+Tutu uses SQLite to store items and steps locally. The database is created automatically on first use.
