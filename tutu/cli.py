@@ -82,21 +82,21 @@ def list(all: bool = typer.Option(False, "--all", help="Show all items including
         return
     
     title = "📋 All Tutu Items" if all else "📋 Pending Tutu Items"
-    table = Table(title=title, show_header=True, header_style="bold magenta")
-    table.add_column("ID", style="cyan", width=6)
-    table.add_column("Title", style="white")
-    table.add_column("Status", style="yellow")
-    table.add_column("Steps", style="green", justify="center")
-    table.add_column("Created", style="blue")
-    table.add_column("Updated", style="blue")
+    table = Table(title=title, show_header=True, header_style="bold magenta", expand=False)
+    table.add_column("ID", style="cyan", width=4)
+    table.add_column("Title", style="white", max_width=40, no_wrap=True, overflow="ellipsis")
+    table.add_column("Status", style="yellow", width=7)
+    table.add_column("Steps", style="green", justify="center", width=6)
+    table.add_column("Created", style="blue", no_wrap=True)
+    table.add_column("Updated", style="blue", no_wrap=True)
     
     for item in items:
         steps_count = len(item.steps)
         completed_steps = sum(1 for step in item.steps if step.status == 'done')
         steps_info = f"{completed_steps}/{steps_count}"
         
-        created = item.created_at.strftime("%Y-%m-%d %H:%M")
-        updated = item.updated_at.strftime("%Y-%m-%d %H:%M")
+        created = item.created_at.strftime("%m/%d %H:%M")
+        updated = item.updated_at.strftime("%m/%d %H:%M")
         
         table.add_row(
             str(item.id),
