@@ -11,6 +11,7 @@ from rich import print as rprint
 from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
+from rich import box
 
 from .models import get_session, TutuItem, TutuItemStep, get_pacific_now
 from .utils import format_relative_time
@@ -22,6 +23,9 @@ console = Console()
 def add():
     """Add a new TutuItem interactively"""
     session = get_session()
+    
+    # Capture the current working directory
+    current_dir = os.getcwd()
     
     console.print("\n✨ [bold cyan]Creating a new TutuItem[/bold cyan] ✨\n")
     
@@ -54,7 +58,8 @@ def add():
         title=title,
         description=description,
         context=context,
-        status='pending'
+        status='pending',
+        working_directory=current_dir
     )
     
     session.add(item)
@@ -142,16 +147,16 @@ def status(item_id: int):
     console.print(Panel(title_text, border_style="cyan", padding=(0, 1)))
     console.print()
     
-    # Status info table
-    status_table = Table(show_header=False, box=None, padding=(0, 2))
-    status_table.add_column("Label", style="bold", no_wrap=True)
+    # Status info table - now using a proper table with borders
+    status_table = Table(show_header=True, header_style="bold cyan", box=box.ROUNDED)
+    status_table.add_column("Field", style="bold", no_wrap=True)
     status_table.add_column("Value", style="bright_white")
     
     # Status badge with emoji
     status_emoji = "🚀" if item.status == "in_progress" else "✅" if item.status == "completed" else "📋"
     status_color = "yellow" if item.status == "in_progress" else "green" if item.status == "completed" else "blue"
     status_table.add_row(
-        f"{status_emoji} Status:",
+        f"{status_emoji} Status",
         f"[{status_color}]{item.status}[/{status_color}]"
     )
     
@@ -160,20 +165,26 @@ def status(item_id: int):
     updated_relative = format_relative_time(item.updated_at)
     
     status_table.add_row(
-        "🕐 Created:",
+        "🕐 Created",
         f"[dim]{created_relative}[/dim] • [bright_blue]{item.created_at.strftime('%Y-%m-%d %H:%M:%S')}[/bright_blue]"
     )
     
     status_table.add_row(
-        "🕑 Updated:",
+        "🕑 Updated",
         f"[dim]{updated_relative}[/dim] • [bright_blue]{item.updated_at.strftime('%Y-%m-%d %H:%M:%S')}[/bright_blue]"
     )
     
     if item.first_progress_at:
         progress_relative = format_relative_time(item.first_progress_at)
         status_table.add_row(
-            "🏁 First Progress:",
+            "🏁 First Progress",
             f"[dim]{progress_relative}[/dim] • [bright_green]{item.first_progress_at.strftime('%Y-%m-%d %H:%M:%S')}[/bright_green]"
+        )
+    
+    if item.working_directory:
+        status_table.add_row(
+            "📂 Working Directory",
+            f"[bright_cyan]{item.working_directory}[/bright_cyan]"
         )
     
     console.print(status_table)
@@ -204,7 +215,7 @@ def status(item_id: int):
     
     if item.steps:
         console.print()
-        console.print("📝 [bold]Steps:[/bold]")
+        console.print("📝 [bold]TutuItemSteps:[/bold]")
         steps_table = Table(show_header=True, header_style="bold magenta", expand=False)
         steps_table.add_column("ID", style="cyan", width=4)
         steps_table.add_column("Description", style="white", max_width=50)
@@ -235,9 +246,6 @@ def status(item_id: int):
 @app.command()
 def start(item_id: int):
     """Start a Claude Code session with TutuItem context"""
-    # Capture the current working directory before any operations
-    original_cwd = os.getcwd()
-    
     session = get_session()
     
     item = session.query(TutuItem).filter(TutuItem.id == item_id).first()
@@ -245,6 +253,9 @@ def start(item_id: int):
     if not item:
         console.print(f"❌ [red]TutuItem with ID {item_id} not found[/red]")
         return
+    
+    # Use the item's working directory if available, otherwise use current directory
+    working_dir = item.working_directory if item.working_directory else os.getcwd()
     
     # Update status and first_progress_at
     item.status = 'in_progress'
@@ -254,6 +265,9 @@ def start(item_id: int):
     session.commit()
     
     console.print(f"🚀 [bold green]Starting Claude Code session for TutuItem #{item.id}[/bold green]\n")
+    
+    if working_dir != os.getcwd():
+        console.print(f"📂 [cyan]Changing to working directory: {working_dir}[/cyan]\n")
     
     # Read README.md
     readme_path = Path(__file__).parent.parent / "README.md"
@@ -271,6 +285,8 @@ def start(item_id: int):
     context = f"""# TutuItem #{item.id}: {item.title}
 
 ## Status: {item.status}
+
+## Working Directory: {working_dir}
 
 ## Description:
 {item.description}
@@ -302,7 +318,7 @@ def start(item_id: int):
             cmd,
             stdin=subprocess.PIPE,
             text=True,
-            cwd=original_cwd,  # Explicitly set the working directory
+            cwd=working_dir,  # Use the item's working directory
             env={**os.environ}  # Pass environment variables
         )
         

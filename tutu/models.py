@@ -22,6 +22,7 @@ class TutuItem(Base):
     description = Column(Text)
     status = Column(String(50), default='pending')
     context = Column(Text)
+    working_directory = Column(String(1024))
     first_progress_at = Column(DateTime)
     created_at = Column(DateTime, default=get_pacific_now)
     updated_at = Column(DateTime, default=get_pacific_now, onupdate=get_pacific_now)
