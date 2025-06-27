@@ -12,6 +12,8 @@ from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
 from rich import box
+import tempfile
+import webbrowser
 
 from .models import get_session, TutuItem, TutuItemStep, get_pacific_now
 from .utils import format_relative_time
@@ -75,6 +77,7 @@ def add():
 def list(all: bool = typer.Option(False, "--all", help="Show all items including completed ones")):
     """List all TutuItems (by default, only shows pending items)"""
     session = get_session()
+    current_dir = os.path.abspath(os.getcwd())
     
     if all:
         items = session.query(TutuItem).order_by(TutuItem.updated_at.desc()).all()
@@ -83,35 +86,55 @@ def list(all: bool = typer.Option(False, "--all", help="Show all items including
             TutuItem.status != 'done'
         ).order_by(TutuItem.updated_at.desc()).all()
     
+    # Filter items to only show those within the current directory hierarchy
+    filtered_items = []
+    for item in items:
+        if item.working_directory:
+            item_dir = os.path.abspath(item.working_directory)
+            # Check if the item's directory is within the current directory or its subdirectories
+            if item_dir.startswith(current_dir + os.sep) or item_dir == current_dir:
+                filtered_items.append(item)
+    
+    items = filtered_items
+    
     if not items:
         if all:
-            console.print("📭 [yellow]No items found![/yellow]")
+            console.print(f"📭 [yellow]No items found in {current_dir} or its subdirectories![/yellow]")
         else:
-            console.print("🎉 [yellow]No pending items![/yellow]")
+            console.print(f"🎉 [yellow]No pending items in {current_dir} or its subdirectories![/yellow]")
         return
     
     title = "📋 All Tutu Items" if all else "📋 Pending Tutu Items"
-    table = Table(title=title, show_header=True, header_style="bold magenta", expand=False)
-    table.add_column("ID", style="cyan", width=4)
-    table.add_column("Title", style="white", max_width=40, no_wrap=True, overflow="ellipsis")
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+    table.add_column("ID", style="cyan", width=3)
+    table.add_column("Title", style="white", max_width=30)
+    table.add_column("Working Directory", style="dim white", no_wrap=False)
+    table.add_column("Description", style="bright_white", max_width=40, no_wrap=False)
     table.add_column("Status", style="yellow", width=7)
-    table.add_column("Steps", style="green", justify="center", width=6)
-    table.add_column("Created", style="blue", no_wrap=True, width=30)
-    table.add_column("Updated", style="blue", no_wrap=True, width=30)
+    table.add_column("Steps", style="green", justify="center", width=5)
+    table.add_column("Created", style="blue", no_wrap=True, width=10)
+    table.add_column("Updated", style="blue", no_wrap=True, width=10)
     
     for item in items:
         steps_count = len(item.steps)
         completed_steps = sum(1 for step in item.steps if step.status == 'done')
         steps_info = f"{completed_steps}/{steps_count}"
         
-        created_relative = format_relative_time(item.created_at)
-        updated_relative = format_relative_time(item.updated_at)
-        created = f"{created_relative} • {item.created_at.strftime('%m/%d %H:%M')}"
-        updated = f"{updated_relative} • {item.updated_at.strftime('%m/%d %H:%M')}"
+        # Shorter date format to fit in narrow columns
+        created = item.created_at.strftime('%m/%d %H:%M')
+        updated = item.updated_at.strftime('%m/%d %H:%M')
+        
+        # Show full working directory path
+        working_dir = item.working_directory or "N/A"
+        
+        # Show description, truncated if needed
+        description = item.description or ""
         
         table.add_row(
             str(item.id),
             item.title,
+            working_dir,
+            description,
             item.status,
             steps_info,
             created,
@@ -306,11 +329,11 @@ def start(item_id: int):
     context += f"\n---\n<README>\n{readme_content}\n</README>\n\n---\n{tutu_prompt_content}\n"
     
     # Start Claude Code with the context using cly function
-    # First, source the daemon-wrappers script and then run cly
+    # First, cd to working directory, then source the daemon-wrappers script and run cly
     cmd = [
         "/bin/zsh",
         "-c",
-        f"source /Users/dorkitude/a/scripts/daemon-wrappers.zsh && cly"
+        f"cd '{working_dir}' && source /Users/dorkitude/a/scripts/daemon-wrappers.zsh && cly"
     ]
     
     try:
@@ -456,6 +479,541 @@ def edit(item_id: int):
     console.print(f"[bold]Description:[/bold]\n{item.description}")
     if item.context:
         console.print(f"[bold]Context:[/bold]\n{item.context}")
+
+@app.command(name="start-all")
+def start_all():
+    """Run all pending TutuItems in batch mode and generate HTML report"""
+    session = get_session()
+    current_dir = os.path.abspath(os.getcwd())
+    
+    # Get all pending items
+    pending_items = session.query(TutuItem).filter(
+        TutuItem.status.in_(['pending', 'in_progress'])
+    ).order_by(TutuItem.created_at).all()
+    
+    # Filter items to only process those within the current directory hierarchy
+    filtered_items = []
+    for item in pending_items:
+        if item.working_directory:
+            item_dir = os.path.abspath(item.working_directory)
+            # Check if the item's directory is within the current directory or its subdirectories
+            if item_dir.startswith(current_dir + os.sep) or item_dir == current_dir:
+                filtered_items.append(item)
+    
+    pending_items = filtered_items
+    
+    if not pending_items:
+        console.print(f"✨ [yellow]No pending TutuItems to process in {current_dir} or its subdirectories![/yellow]")
+        return
+    
+    console.print(f"🚀 [bold cyan]Starting batch processing of {len(pending_items)} items[/bold cyan]\n")
+    
+    # Read TUTU_START_ALL_COMMAND.md
+    tutu_batch_prompt_path = Path(__file__).parent.parent / "TUTU_START_ALL_COMMAND.md"
+    tutu_batch_prompt_content = ""
+    if tutu_batch_prompt_path.exists():
+        tutu_batch_prompt_content = tutu_batch_prompt_path.read_text()
+    
+    # Read README.md
+    readme_path = Path(__file__).parent.parent / "README.md"
+    readme_content = ""
+    if readme_path.exists():
+        readme_content = readme_path.read_text()
+    
+    # Read TUTU_START_PROMPT.md
+    tutu_prompt_path = Path(__file__).parent.parent / "TUTU_START_PROMPT.md"
+    tutu_prompt_content = ""
+    if tutu_prompt_path.exists():
+        tutu_prompt_content = tutu_prompt_path.read_text()
+    
+    results = []
+    
+    for idx, item in enumerate(pending_items, 1):
+        console.print(f"\n{'='*60}")
+        console.print(f"[bold]Processing item {idx}/{len(pending_items)}: #{item.id} - {item.title}[/bold]")
+        console.print(f"{'='*60}\n")
+        
+        # Update status and first_progress_at
+        item.status = 'in_progress'
+        if not item.first_progress_at:
+            item.first_progress_at = get_pacific_now()
+        session.commit()
+        
+        # Use the item's working directory
+        working_dir = item.working_directory if item.working_directory else os.getcwd()
+        
+        # Prepare context for Claude Code
+        context = f"""# TutuItem #{item.id}: {item.title}
+
+## Status: {item.status}
+
+## Working Directory: {working_dir}
+
+## Description:
+{item.description}
+
+## Context:
+{item.context}
+
+## Steps:
+"""
+        
+        for step in item.steps:
+            context += f"- [{step.status}] Step #{step.id}: {step.description}\n"
+        
+        if not item.steps:
+            context += "No steps defined yet.\n"
+        
+        context += f"\n---\n<README>\n{readme_content}\n</README>\n\n---\n{tutu_prompt_content}\n\n---\n{tutu_batch_prompt_content}\n"
+        
+        # Run Claude Code in non-interactive mode
+        # First cd to working directory
+        cmd = [
+            "/bin/zsh",
+            "-c",
+            f"cd '{working_dir}' && source /Users/dorkitude/a/scripts/daemon-wrappers.zsh && claude -p --dangerously-skip-permissions"
+        ]
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=working_dir,
+                env={**os.environ}
+            )
+            
+            # Send the context and get output
+            stdout, stderr = process.communicate(input=context)
+            
+            # Refresh item from database to get latest status
+            session.refresh(item)
+            
+            result = {
+                'item': item,
+                'stdout': stdout,
+                'stderr': stderr,
+                'return_code': process.returncode,
+                'steps_completed': [step for step in item.steps if step.status == 'done']
+            }
+            results.append(result)
+            
+            console.print(f"✅ [green]Completed processing item #{item.id}[/green]")
+            
+        except Exception as e:
+            console.print(f"❌ [red]Error processing item #{item.id}: {e}[/red]")
+            results.append({
+                'item': item,
+                'stdout': '',
+                'stderr': str(e),
+                'return_code': -1,
+                'steps_completed': []
+            })
+    
+    # Generate HTML report
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_filename = f"report_{timestamp}.html"
+    report_path = Path(os.getcwd()) / report_filename
+    
+    html_content = generate_html_report(results, pending_items)
+    
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    console.print(f"\n📊 [bold green]Report generated: {report_path}[/bold green]")
+    
+    # Open in browser
+    webbrowser.open(f"file://{report_path}")
+    console.print("🌐 [cyan]Opening report in browser...[/cyan]")
+
+def generate_html_report(results, all_items):
+    """Generate HTML report with Catppuccin Mocha theme"""
+    
+    # Catppuccin Mocha colors
+    catppuccin_mocha = {
+        'base': '#1e1e2e',
+        'mantle': '#181825',
+        'crust': '#11111b',
+        'text': '#cdd6f4',
+        'subtext0': '#a6adc8',
+        'surface0': '#313244',
+        'surface1': '#45475a',
+        'surface2': '#585b70',
+        'green': '#a6e3a1',
+        'red': '#f38ba8',
+        'yellow': '#f9e2af',
+        'blue': '#89b4fa',
+        'mauve': '#cba6f7',
+        'teal': '#94e2d5',
+        'peach': '#fab387',
+        'maroon': '#eba0ac',
+        'lavender': '#b4befe',
+    }
+    
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tutu Batch Processing Report - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</title>
+    <style>
+        :root {{
+            --base: {catppuccin_mocha['base']};
+            --mantle: {catppuccin_mocha['mantle']};
+            --crust: {catppuccin_mocha['crust']};
+            --text: {catppuccin_mocha['text']};
+            --subtext0: {catppuccin_mocha['subtext0']};
+            --surface0: {catppuccin_mocha['surface0']};
+            --surface1: {catppuccin_mocha['surface1']};
+            --surface2: {catppuccin_mocha['surface2']};
+            --green: {catppuccin_mocha['green']};
+            --red: {catppuccin_mocha['red']};
+            --yellow: {catppuccin_mocha['yellow']};
+            --blue: {catppuccin_mocha['blue']};
+            --mauve: {catppuccin_mocha['mauve']};
+            --teal: {catppuccin_mocha['teal']};
+            --peach: {catppuccin_mocha['peach']};
+            --lavender: {catppuccin_mocha['lavender']};
+        }}
+        
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--base);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+        }}
+        
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+        }}
+        
+        h1 {{
+            color: var(--mauve);
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+        }}
+        
+        .summary {{
+            background-color: var(--mantle);
+            border: 1px solid var(--surface0);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }}
+        
+        .summary h2 {{
+            color: var(--blue);
+            margin-bottom: 1rem;
+        }}
+        
+        .stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }}
+        
+        .stat-card {{
+            background-color: var(--surface0);
+            padding: 1rem;
+            border-radius: 6px;
+            text-align: center;
+        }}
+        
+        .stat-card .number {{
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--peach);
+        }}
+        
+        .stat-card .label {{
+            color: var(--subtext0);
+            font-size: 0.9rem;
+        }}
+        
+        .item {{
+            background-color: var(--mantle);
+            border: 1px solid var(--surface0);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }}
+        
+        .item-header {{
+            background-color: var(--surface0);
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        
+        .item-title {{
+            color: var(--lavender);
+            font-size: 1.3rem;
+            font-weight: bold;
+        }}
+        
+        .status {{
+            padding: 0.3rem 0.8rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }}
+        
+        .status.done {{
+            background-color: var(--green);
+            color: var(--crust);
+        }}
+        
+        .status.in_progress {{
+            background-color: var(--yellow);
+            color: var(--crust);
+        }}
+        
+        .status.pending {{
+            background-color: var(--surface2);
+            color: var(--text);
+        }}
+        
+        .item-content {{
+            padding: 1.5rem;
+        }}
+        
+        .section {{
+            margin-bottom: 1.5rem;
+        }}
+        
+        .section h3 {{
+            color: var(--teal);
+            margin-bottom: 0.5rem;
+        }}
+        
+        .description, .context {{
+            background-color: var(--surface0);
+            padding: 1rem;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }}
+        
+        .steps {{
+            margin-top: 0.5rem;
+        }}
+        
+        .step {{
+            padding: 0.5rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }}
+        
+        .step.done {{
+            color: var(--green);
+        }}
+        
+        .step.pending {{
+            color: var(--subtext0);
+        }}
+        
+        .output {{
+            background-color: var(--crust);
+            border: 1px solid var(--surface1);
+            border-radius: 4px;
+            padding: 1rem;
+            margin-top: 1rem;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }}
+        
+        .error {{
+            color: var(--red);
+        }}
+        
+        .working-dir {{
+            color: var(--blue);
+            font-family: monospace;
+            font-size: 0.9rem;
+        }}
+        
+        .timestamp {{
+            color: var(--subtext0);
+            text-align: center;
+            margin-top: 3rem;
+            font-size: 0.9rem;
+        }}
+        
+        .expand-button {{
+            background-color: var(--surface1);
+            color: var(--text);
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.2s;
+        }}
+        
+        .expand-button:hover {{
+            background-color: var(--surface2);
+        }}
+        
+        .collapsible {{
+            max-height: 200px;
+            overflow: hidden;
+            position: relative;
+        }}
+        
+        .collapsible.expanded {{
+            max-height: none;
+        }}
+        
+        .collapsible::after {{
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: linear-gradient(transparent, var(--crust));
+            pointer-events: none;
+        }}
+        
+        .collapsible.expanded::after {{
+            display: none;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Tutu Batch Processing Report</h1>
+        
+        <div class="summary">
+            <h2>📊 Summary</h2>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="number">{len(all_items)}</div>
+                    <div class="label">Total Items</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">{sum(1 for r in results if r['item'].status == 'done')}</div>
+                    <div class="label">Completed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">{sum(1 for r in results if r['item'].status == 'in_progress')}</div>
+                    <div class="label">In Progress</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">{sum(len(r['steps_completed']) for r in results)}</div>
+                    <div class="label">Steps Completed</div>
+                </div>
+            </div>
+        </div>
+"""
+    
+    for result in results:
+        item = result['item']
+        status_class = item.status.replace(' ', '_')
+        
+        html += f"""
+        <div class="item">
+            <div class="item-header">
+                <div>
+                    <span class="item-title">#{item.id}: {item.title}</span>
+                    <div class="working-dir">📁 {item.working_directory}</div>
+                </div>
+                <span class="status {status_class}">{item.status.upper()}</span>
+            </div>
+            <div class="item-content">
+                <div class="section">
+                    <h3>Description</h3>
+                    <div class="description">{item.description}</div>
+                </div>
+"""
+        
+        if item.context:
+            html += f"""
+                <div class="section">
+                    <h3>Context</h3>
+                    <div class="context">{item.context}</div>
+                </div>
+"""
+        
+        if item.steps:
+            html += """
+                <div class="section">
+                    <h3>Steps</h3>
+                    <div class="steps">
+"""
+            for step in item.steps:
+                step_class = 'done' if step.status == 'done' else 'pending'
+                icon = '✅' if step.status == 'done' else '⏳'
+                html += f"""
+                        <div class="step {step_class}">
+                            {icon} Step #{step.id}: {step.description}
+                        </div>
+"""
+            html += """
+                    </div>
+                </div>
+"""
+        
+        # Add output section
+        if result['stdout'] or result['stderr']:
+            output_id = f"output_{item.id}"
+            html += f"""
+                <div class="section">
+                    <h3>Output <button class="expand-button" onclick="toggleExpand('{output_id}')">Toggle Full Output</button></h3>
+                    <div class="output collapsible" id="{output_id}">"""
+            
+            if result['stdout']:
+                html += result['stdout']
+            
+            if result['stderr']:
+                html += f"""\n\n<span class="error">Errors:\n{result['stderr']}</span>"""
+            
+            html += """
+                    </div>
+                </div>
+"""
+        
+        html += """
+            </div>
+        </div>
+"""
+    
+    html += f"""
+        <div class="timestamp">
+            Generated on {datetime.now().strftime("%Y-%m-%d at %H:%M:%S")} Pacific Time
+        </div>
+    </div>
+    
+    <script>
+        function toggleExpand(id) {{
+            const element = document.getElementById(id);
+            element.classList.toggle('expanded');
+        }}
+    </script>
+</body>
+</html>
+"""
+    
+    return html
 
 def main():
     import sys
