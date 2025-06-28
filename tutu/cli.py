@@ -74,7 +74,11 @@ def add():
         console.print(f"[bold]Context:[/bold]\n{item.context}")
 
 @app.command()
-def list(all: bool = typer.Option(False, "--all", help="Show all items including completed ones")):
+def list(
+    all: bool = typer.Option(False, "--all", help="Show all items including completed ones"),
+    everywhere: bool = typer.Option(False, "--everywhere", help="Show items from all directories, not just current"),
+    verbose: bool = typer.Option(False, "--verbose", help="Show detailed information including descriptions")
+):
     """List all TutuItems (by default, only shows pending items)"""
     session = get_session()
     current_dir = os.path.abspath(os.getcwd())
@@ -86,30 +90,40 @@ def list(all: bool = typer.Option(False, "--all", help="Show all items including
             TutuItem.status != 'done'
         ).order_by(TutuItem.updated_at.desc()).all()
     
-    # Filter items to only show those within the current directory hierarchy
-    filtered_items = []
-    for item in items:
-        if item.working_directory:
-            item_dir = os.path.abspath(item.working_directory)
-            # Check if the item's directory is within the current directory or its subdirectories
-            if item_dir.startswith(current_dir + os.sep) or item_dir == current_dir:
-                filtered_items.append(item)
-    
-    items = filtered_items
+    # Filter items to only show those within the current directory hierarchy (unless --everywhere is used)
+    if not everywhere:
+        filtered_items = []
+        for item in items:
+            if item.working_directory:
+                item_dir = os.path.abspath(item.working_directory)
+                # Check if the item's directory is within the current directory or its subdirectories
+                if item_dir.startswith(current_dir + os.sep) or item_dir == current_dir:
+                    filtered_items.append(item)
+        
+        items = filtered_items
     
     if not items:
-        if all:
-            console.print(f"📭 [yellow]No items found in {current_dir} or its subdirectories![/yellow]")
+        if everywhere:
+            if all:
+                console.print(f"📭 [yellow]No items found anywhere![/yellow]")
+            else:
+                console.print(f"🎉 [yellow]No pending items found anywhere![/yellow]")
         else:
-            console.print(f"🎉 [yellow]No pending items in {current_dir} or its subdirectories![/yellow]")
+            if all:
+                console.print(f"📭 [yellow]No items found in {current_dir} or its subdirectories![/yellow]")
+            else:
+                console.print(f"🎉 [yellow]No pending items in {current_dir} or its subdirectories![/yellow]")
         return
     
     title = "📋 All Tutu Items" if all else "📋 Pending Tutu Items"
+    if everywhere:
+        title += " (Everywhere)"
     table = Table(title=title, show_header=True, header_style="bold magenta")
     table.add_column("ID", style="cyan", width=3)
     table.add_column("Title", style="white", max_width=30)
     table.add_column("Working Directory", style="dim white", no_wrap=False)
-    table.add_column("Description", style="bright_white", max_width=40, no_wrap=False)
+    if verbose:
+        table.add_column("Description", style="bright_white", max_width=40, no_wrap=False)
     table.add_column("Status", style="yellow", width=7)
     table.add_column("Steps", style="green", justify="center", width=5)
     table.add_column("Created", style="blue", no_wrap=True, width=10)
@@ -130,16 +144,24 @@ def list(all: bool = typer.Option(False, "--all", help="Show all items including
         # Show description, truncated if needed
         description = item.description or ""
         
-        table.add_row(
+        # Build row data based on verbose flag
+        row_data = [
             str(item.id),
             item.title,
-            working_dir,
-            description,
+            working_dir
+        ]
+        
+        if verbose:
+            row_data.append(description)
+        
+        row_data.extend([
             item.status,
             steps_info,
             created,
             updated
-        )
+        ])
+        
+        table.add_row(*row_data)
     
     console.print(table)
 
@@ -480,8 +502,34 @@ def edit(item_id: int):
     if item.context:
         console.print(f"[bold]Context:[/bold]\n{item.context}")
 
+@app.command(name="import")
+def import_item(item_id: int):
+    """Import a TutuItem by changing its working directory to the current directory"""
+    session = get_session()
+    current_dir = os.path.abspath(os.getcwd())
+    
+    item = session.query(TutuItem).filter(TutuItem.id == item_id).first()
+    
+    if not item:
+        console.print(f"❌ [red]TutuItem with ID {item_id} not found[/red]")
+        return
+    
+    # Store the old directory for display
+    old_dir = item.working_directory or "(not set)"
+    
+    # Update the working directory
+    item.working_directory = current_dir
+    session.commit()
+    
+    console.print(f"\n✨ [bold green]Successfully imported TutuItem #{item.id}![/bold green]")
+    console.print(f"[bold]Title:[/bold] {item.title}")
+    console.print(f"[bold]Previous directory:[/bold] {old_dir}")
+    console.print(f"[bold]New directory:[/bold] {current_dir}")
+
 @app.command(name="start-all")
-def start_all():
+def start_all(
+    everywhere: bool = typer.Option(False, "--everywhere", help="Process items from all directories, not just current")
+):
     """Run all pending TutuItems in batch mode and generate HTML report"""
     session = get_session()
     current_dir = os.path.abspath(os.getcwd())
@@ -491,19 +539,23 @@ def start_all():
         TutuItem.status.in_(['pending', 'in_progress'])
     ).order_by(TutuItem.created_at).all()
     
-    # Filter items to only process those within the current directory hierarchy
-    filtered_items = []
-    for item in pending_items:
-        if item.working_directory:
-            item_dir = os.path.abspath(item.working_directory)
-            # Check if the item's directory is within the current directory or its subdirectories
-            if item_dir.startswith(current_dir + os.sep) or item_dir == current_dir:
-                filtered_items.append(item)
-    
-    pending_items = filtered_items
+    # Filter items to only process those within the current directory hierarchy (unless --everywhere is used)
+    if not everywhere:
+        filtered_items = []
+        for item in pending_items:
+            if item.working_directory:
+                item_dir = os.path.abspath(item.working_directory)
+                # Check if the item's directory is within the current directory or its subdirectories
+                if item_dir.startswith(current_dir + os.sep) or item_dir == current_dir:
+                    filtered_items.append(item)
+        
+        pending_items = filtered_items
     
     if not pending_items:
-        console.print(f"✨ [yellow]No pending TutuItems to process in {current_dir} or its subdirectories![/yellow]")
+        if everywhere:
+            console.print(f"✨ [yellow]No pending TutuItems to process anywhere![/yellow]")
+        else:
+            console.print(f"✨ [yellow]No pending TutuItems to process in {current_dir} or its subdirectories![/yellow]")
         return
     
     console.print(f"🚀 [bold cyan]Starting batch processing of {len(pending_items)} items[/bold cyan]\n")
